@@ -1,0 +1,7 @@
+build/
+cmake-build-*/
+.vscode/
+*.db
+data/runtime/
+*.mmdb
+.cache/
