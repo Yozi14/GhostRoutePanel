@@ -23,10 +23,14 @@ public:
     int64_t ensure_tenant(const std::string& slug, const std::string& name);
     std::optional<int64_t> tenant_id_by_slug(const std::string& slug);
 
-    int64_t create_user(int64_t tenant_id, const std::string& name, int64_t limit_bytes);
+    int64_t create_user(int64_t tenant_id, const std::string& name, int64_t limit_bytes,
+                        int device_limit = 0);
     std::vector<User> list_users(int64_t tenant_id, int limit = 100);
     std::optional<User> user_by_name(int64_t tenant_id, const std::string& name);
     bool delete_user(int64_t tenant_id, const std::string& name);
+    bool update_user(int64_t tenant_id, const std::string& name, std::optional<bool> enabled,
+                     std::optional<int64_t> limit_bytes, std::optional<int> device_limit);
+    bool reset_user_traffic(int64_t tenant_id, const std::string& name);
 
     void record_traffic_hourly(int64_t tenant_id, const std::string& hour, int64_t up, int64_t down);
     std::vector<HourlyTraffic> hourly_traffic(int64_t tenant_id, int hours = 24);
@@ -48,6 +52,8 @@ public:
 private:
     sqlite3* db_{nullptr};
     void exec(const std::string& sql);
+    void apply_migrations();
+    static User row_to_user(sqlite3_stmt* stmt);
 };
 
 } // namespace ghostroute

@@ -31,12 +31,16 @@ int64_t parse_size(const std::string& s) {
 
 void usage() {
     std::cout << "GhostRoutePanel CLI\n\n"
-              << "  ghostroute user add --name <name> [--limit 100gb] [--tenant slug]\n"
+              << "  ghostroute user add --name <name> [--limit 100gb] [--devices N] [--tenant slug]\n"
               << "  ghostroute user list [--tenant slug]\n"
               << "  ghostroute user del --name <name> [--tenant slug]\n"
+              << "  ghostroute user reset --name <name> [--tenant slug]\n"
+              << "  ghostroute user enable --name <name> [--tenant slug]\n"
+              << "  ghostroute user disable --name <name> [--tenant slug]\n"
               << "  ghostroute tenant add --slug <slug> --name <name>\n"
               << "  ghostroute update [--channel stable|beta]\n"
-              << "  ghostroute health\n";
+              << "  ghostroute health\n"
+              << "  ghostroute stats\n";
 }
 
 } // namespace
@@ -81,6 +85,16 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (cmd == "stats") {
+        auto m = ghostroute::SystemStats::sample();
+        std::cout << "CPU:  " << static_cast<int>(m.cpu_percent) << "%\n"
+                  << "RAM:  " << static_cast<int>(m.ram_percent) << "% ("
+                  << m.ram_used_mb << "/" << m.ram_total_mb << " MB)\n"
+                  << "Disk: " << static_cast<int>(m.disk_percent) << "%\n"
+                  << "Uptime: " << m.uptime_sec << " sec\n";
+        return 0;
+    }
+
     if (cmd == "tenant" && argc >= 3 && std::string(argv[2]) == "add") {
         auto slug = get_arg("--slug");
         auto name = get_arg("--name");
@@ -110,7 +124,10 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             int64_t limit = limit_s.empty() ? 0 : parse_size(limit_s);
-            db.create_user(*tenant_id, name, limit);
+            int devices = 0;
+            auto dev_s = get_arg("--devices");
+            if (!dev_s.empty()) devices = std::stoi(dev_s);
+            db.create_user(*tenant_id, name, limit, devices);
             auto users = db.list_users(*tenant_id);
             xray.sync_users(users);
             hysteria.sync_users(users);
@@ -120,7 +137,39 @@ int main(int argc, char* argv[]) {
         if (sub == "list") {
             for (const auto& u : db.list_users(*tenant_id))
                 std::cout << u.name << "  used=" << u.traffic_used_bytes
-                          << "  limit=" << u.traffic_limit_bytes << "\n";
+                          << "  limit=" << u.traffic_limit_bytes
+                          << "  devices=" << u.device_count << "/" << u.device_limit
+                          << "  " << (u.enabled ? "on" : "off") << "\n";
+            return 0;
+        }
+        if (sub == "reset") {
+            auto name = get_arg("--name");
+            if (name.empty()) {
+                std::cerr << "--name required\n";
+                return 1;
+            }
+            if (!db.reset_user_traffic(*tenant_id, name)) {
+                std::cerr << "user not found\n";
+                return 1;
+            }
+            std::cout << "Traffic reset for '" << name << "'\n";
+            return 0;
+        }
+        if (sub == "enable" || sub == "disable") {
+            auto name = get_arg("--name");
+            if (name.empty()) {
+                std::cerr << "--name required\n";
+                return 1;
+            }
+            const bool on = sub == "enable";
+            if (!db.update_user(*tenant_id, name, on, std::nullopt, std::nullopt)) {
+                std::cerr << "user not found\n";
+                return 1;
+            }
+            auto users = db.list_users(*tenant_id);
+            xray.sync_users(users);
+            hysteria.sync_users(users);
+            std::cout << "User '" << name << "' " << (on ? "enabled" : "disabled") << "\n";
             return 0;
         }
         if (sub == "del") {

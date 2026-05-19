@@ -52,6 +52,32 @@ void Database::migrate(const std::string& schema_path) {
     std::ostringstream ss;
     ss << f.rdbuf();
     exec(ss.str());
+    apply_migrations();
+}
+
+void Database::apply_migrations() {
+    auto try_alter = [this](const char* sql) {
+        char* err = nullptr;
+        if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
+            if (err) sqlite3_free(err);
+        }
+    };
+    try_alter("ALTER TABLE users ADD COLUMN device_limit INTEGER NOT NULL DEFAULT 0");
+    try_alter("ALTER TABLE users ADD COLUMN device_count INTEGER NOT NULL DEFAULT 0");
+}
+
+User Database::row_to_user(sqlite3_stmt* stmt) {
+    User u;
+    u.id = sqlite3_column_int64(stmt, 0);
+    u.tenant_id = sqlite3_column_int64(stmt, 1);
+    u.uuid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+    u.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+    u.traffic_limit_bytes = sqlite3_column_int64(stmt, 4);
+    u.traffic_used_bytes = sqlite3_column_int64(stmt, 5);
+    u.enabled = sqlite3_column_int(stmt, 6) != 0;
+    u.device_limit = sqlite3_column_int(stmt, 7);
+    u.device_count = sqlite3_column_int(stmt, 8);
+    return u;
 }
 
 int64_t Database::ensure_tenant(const std::string& slug, const std::string& name) {
@@ -79,16 +105,19 @@ std::optional<int64_t> Database::tenant_id_by_slug(const std::string& slug) {
     return std::nullopt;
 }
 
-int64_t Database::create_user(int64_t tenant_id, const std::string& name, int64_t limit_bytes) {
+int64_t Database::create_user(int64_t tenant_id, const std::string& name, int64_t limit_bytes,
+                              int device_limit) {
     sqlite3_stmt* stmt = nullptr;
     const char* sql =
-        "INSERT INTO users (tenant_id, uuid, name, traffic_limit_bytes) VALUES (?, ?, ?, ?);";
+        "INSERT INTO users (tenant_id, uuid, name, traffic_limit_bytes, device_limit) VALUES (?, "
+        "?, ?, ?, ?);";
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
     auto uid = uuid_v4();
     sqlite3_bind_int64(stmt, 1, tenant_id);
     sqlite3_bind_text(stmt, 2, uid.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(stmt, 4, limit_bytes);
+    sqlite3_bind_int(stmt, 5, device_limit);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
         auto err = sqlite3_errmsg(db_);
         sqlite3_finalize(stmt);
@@ -103,21 +132,11 @@ std::vector<User> Database::list_users(int64_t tenant_id, int limit) {
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_,
                        "SELECT id, tenant_id, uuid, name, traffic_limit_bytes, traffic_used_bytes, "
-                       "enabled FROM users WHERE tenant_id = ? LIMIT ?;",
+                       "enabled, device_limit, device_count FROM users WHERE tenant_id = ? LIMIT ?;",
                        -1, &stmt, nullptr);
     sqlite3_bind_int64(stmt, 1, tenant_id);
     sqlite3_bind_int(stmt, 2, limit);
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        User u;
-        u.id = sqlite3_column_int64(stmt, 0);
-        u.tenant_id = sqlite3_column_int64(stmt, 1);
-        u.uuid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-        u.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-        u.traffic_limit_bytes = sqlite3_column_int64(stmt, 4);
-        u.traffic_used_bytes = sqlite3_column_int64(stmt, 5);
-        u.enabled = sqlite3_column_int(stmt, 6) != 0;
-        out.push_back(std::move(u));
-    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) out.push_back(row_to_user(stmt));
     sqlite3_finalize(stmt);
     return out;
 }
@@ -126,7 +145,8 @@ std::optional<User> Database::user_by_name(int64_t tenant_id, const std::string&
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_,
                        "SELECT id, tenant_id, uuid, name, traffic_limit_bytes, traffic_used_bytes, "
-                       "enabled FROM users WHERE tenant_id = ? AND name = ?;",
+                       "enabled, device_limit, device_count FROM users WHERE tenant_id = ? AND "
+                       "name = ?;",
                        -1, &stmt, nullptr);
     sqlite3_bind_int64(stmt, 1, tenant_id);
     sqlite3_bind_text(stmt, 2, name.c_str(), -1, SQLITE_TRANSIENT);
@@ -134,16 +154,47 @@ std::optional<User> Database::user_by_name(int64_t tenant_id, const std::string&
         sqlite3_finalize(stmt);
         return std::nullopt;
     }
-    User u;
-    u.id = sqlite3_column_int64(stmt, 0);
-    u.tenant_id = sqlite3_column_int64(stmt, 1);
-    u.uuid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-    u.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-    u.traffic_limit_bytes = sqlite3_column_int64(stmt, 4);
-    u.traffic_used_bytes = sqlite3_column_int64(stmt, 5);
-    u.enabled = sqlite3_column_int(stmt, 6) != 0;
+    auto u = row_to_user(stmt);
     sqlite3_finalize(stmt);
     return u;
+}
+
+bool Database::update_user(int64_t tenant_id, const std::string& name, std::optional<bool> enabled,
+                           std::optional<int64_t> limit_bytes, std::optional<int> device_limit) {
+    auto u = user_by_name(tenant_id, name);
+    if (!u) return false;
+
+    const bool en = enabled.value_or(u->enabled);
+    const int64_t lim = limit_bytes.value_or(u->traffic_limit_bytes);
+    const int dev = device_limit.value_or(u->device_limit);
+
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_,
+                       "UPDATE users SET enabled = ?, traffic_limit_bytes = ?, device_limit = ? "
+                       "WHERE tenant_id = ? AND name = ?;",
+                       -1, &stmt, nullptr);
+    sqlite3_bind_int(stmt, 1, en ? 1 : 0);
+    sqlite3_bind_int64(stmt, 2, lim);
+    sqlite3_bind_int(stmt, 3, dev);
+    sqlite3_bind_int64(stmt, 4, tenant_id);
+    sqlite3_bind_text(stmt, 5, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    const auto ok = sqlite3_changes(db_) > 0;
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool Database::reset_user_traffic(int64_t tenant_id, const std::string& name) {
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_,
+                       "UPDATE users SET traffic_used_bytes = 0 WHERE tenant_id = ? AND name = ?;",
+                       -1, &stmt, nullptr);
+    sqlite3_bind_int64(stmt, 1, tenant_id);
+    sqlite3_bind_text(stmt, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    const auto ok = sqlite3_changes(db_) > 0;
+    sqlite3_finalize(stmt);
+    return ok;
 }
 
 bool Database::delete_user(int64_t tenant_id, const std::string& name) {
@@ -235,22 +286,12 @@ std::vector<User> Database::top_users_by_traffic(int64_t tenant_id, int limit) {
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_,
                        "SELECT id, tenant_id, uuid, name, traffic_limit_bytes, traffic_used_bytes, "
-                       "enabled FROM users WHERE tenant_id = ? ORDER BY traffic_used_bytes DESC "
-                       "LIMIT ?;",
+                       "enabled, device_limit, device_count FROM users WHERE tenant_id = ? ORDER "
+                       "BY traffic_used_bytes DESC LIMIT ?;",
                        -1, &stmt, nullptr);
     sqlite3_bind_int64(stmt, 1, tenant_id);
     sqlite3_bind_int(stmt, 2, limit);
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        User u;
-        u.id = sqlite3_column_int64(stmt, 0);
-        u.tenant_id = sqlite3_column_int64(stmt, 1);
-        u.uuid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-        u.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-        u.traffic_limit_bytes = sqlite3_column_int64(stmt, 4);
-        u.traffic_used_bytes = sqlite3_column_int64(stmt, 5);
-        u.enabled = sqlite3_column_int(stmt, 6) != 0;
-        out.push_back(std::move(u));
-    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) out.push_back(row_to_user(stmt));
     sqlite3_finalize(stmt);
     return out;
 }

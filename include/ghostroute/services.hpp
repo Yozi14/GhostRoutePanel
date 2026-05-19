@@ -113,4 +113,9 @@ public:
     static Result check_and_update(const std::string& repo, const std::string& channel);
 };
 
+class SystemStats {
+public:
+    static SystemMetrics sample();
+};
+
 } // namespace ghostroute

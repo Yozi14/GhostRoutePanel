@@ -89,14 +89,26 @@ ghostroute-panel (HTTP :8080)
 | GET | `/api/analytics/dashboard` | Графики, страны, топ |
 | GET | `/api/alerts` | Активные алерты |
 | GET/POST/DELETE | `/api/users` | CRUD пользователей |
+| PATCH | `/api/users/:name` | Вкл/выкл, лимит, устройства |
+| POST | `/api/users/:name/reset-traffic` | Сброс использованного трафика |
+| GET | `/api/users/:name/link` | Subscription-ссылка (шаблон) |
+| GET | `/api/system/stats` | CPU, RAM, диск, uptime |
 | GET | `/api/health` | Статус Xray/Hysteria |
 | POST | `/api/provision/full` | Полная установка сервера |
 
+## Новое в v0.2
+
+- Карточки пользователей: вкл/выкл, сброс трафика, лимит устройств
+- Мониторинг CPU / RAM / диск / uptime (как в Hiddify)
+- Логотип «лис свободы» (freedom route)
+- Экспорт пользователей JSON, копирование UUID и subscription-ссылки
+
 ## Дорожная карта
 
+- [ ] **Qt/C++ клиент** для пользователей (после стабилизации панели)
 - [ ] JWT-авторизация и суперадмин
 - [ ] libmaxminddb для реального GeoIP
-- [ ] Парсинг access.log Xray → ingest в аналитику
+- [ ] Парсинг access.log Xray → ingest в аналитику + учёт device_count
 - [ ] Telegram-бот для алертов
 - [ ] Docker-образ one-liner
 

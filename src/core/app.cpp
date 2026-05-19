@@ -12,6 +12,27 @@ App::App(PanelConfig cfg)
     : cfg_(std::move(cfg)),
       tenant_resolver_(cfg_.multitenancy, cfg_.default_tenant) {}
 
+nlohmann::json App::user_to_json(const User& u) {
+    const auto pct = u.traffic_limit_bytes > 0
+                         ? (100.0 * u.traffic_used_bytes) / u.traffic_limit_bytes
+                         : 0.0;
+    return {{"id", u.id},
+            {"name", u.name},
+            {"uuid", u.uuid},
+            {"used", u.traffic_used_bytes},
+            {"limit", u.traffic_limit_bytes},
+            {"enabled", u.enabled},
+            {"device_limit", u.device_limit},
+            {"device_count", u.device_count},
+            {"usage_percent", pct}};
+}
+
+void App::sync_vpn_users(int64_t tenant_id) {
+    auto users = db_->list_users(tenant_id);
+    xray_->sync_users(users);
+    hysteria_->sync_users(users);
+}
+
 int64_t App::resolve_tenant_id(const httplib::Request& req) const {
     std::optional<std::string> header;
     if (req.has_header("X-Tenant-ID")) header = req.get_header_value("X-Tenant-ID");
@@ -48,16 +69,24 @@ void App::register_routes(httplib::Server& svr) {
         res.set_content(j.dump(), "application/json");
     });
 
+    svr.Get("/api/system/stats", [this](const httplib::Request& req, httplib::Response& res) {
+        (void)req;
+        auto m = SystemStats::sample();
+        alerts_->check_server_load(m.cpu_percent);
+        nlohmann::json j = {{"cpu_percent", m.cpu_percent},
+                            {"ram_percent", m.ram_percent},
+                            {"ram_used_mb", m.ram_used_mb},
+                            {"ram_total_mb", m.ram_total_mb},
+                            {"disk_percent", m.disk_percent},
+                            {"uptime_sec", m.uptime_sec},
+                            {"load_avg_1", m.load_avg_1}};
+        res.set_content(j.dump(), "application/json");
+    });
+
     svr.Get("/api/users", [this](const httplib::Request& req, httplib::Response& res) {
         auto tid = resolve_tenant_id(req);
         nlohmann::json j = nlohmann::json::array();
-        for (const auto& u : db_->list_users(tid))
-            j.push_back({{"id", u.id},
-                         {"name", u.name},
-                         {"uuid", u.uuid},
-                         {"used", u.traffic_used_bytes},
-                         {"limit", u.traffic_limit_bytes},
-                         {"enabled", u.enabled}});
+        for (const auto& u : db_->list_users(tid)) j.push_back(user_to_json(u));
         res.set_content(j.dump(), "application/json");
     });
 
@@ -70,21 +99,71 @@ void App::register_routes(httplib::Server& svr) {
             return;
         }
         int64_t limit = 0;
+        int device_limit = 0;
         if (body.contains("limit_bytes")) limit = body["limit_bytes"].get<int64_t>();
-        db_->create_user(tid, body["name"].get<std::string>(), limit);
-        auto users = db_->list_users(tid);
-        xray_->sync_users(users);
-        hysteria_->sync_users(users);
+        if (body.contains("device_limit")) device_limit = body["device_limit"].get<int>();
+        db_->create_user(tid, body["name"].get<std::string>(), limit, device_limit);
+        sync_vpn_users(tid);
         res.set_content(R"({"ok":true})", "application/json");
+    });
+
+    svr.Patch(R"(/api/users/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
+        auto tid = resolve_tenant_id(req);
+        auto name = req.matches[1].str();
+        auto body = nlohmann::json::parse(req.body, nullptr, false);
+        if (body.is_discarded()) {
+            res.status = 400;
+            res.set_content(R"({"error":"invalid json"})", "application/json");
+            return;
+        }
+        std::optional<bool> enabled;
+        std::optional<int64_t> limit;
+        std::optional<int> devices;
+        if (body.contains("enabled")) enabled = body["enabled"].get<bool>();
+        if (body.contains("limit_bytes")) limit = body["limit_bytes"].get<int64_t>();
+        if (body.contains("device_limit")) devices = body["device_limit"].get<int>();
+        if (!db_->update_user(tid, name, enabled, limit, devices)) {
+            res.status = 404;
+            res.set_content(R"({"error":"user not found"})", "application/json");
+            return;
+        }
+        sync_vpn_users(tid);
+        res.set_content(R"({"ok":true})", "application/json");
+    });
+
+    svr.Post(R"(/api/users/([^/]+)/reset-traffic)",
+             [this](const httplib::Request& req, httplib::Response& res) {
+                 auto tid = resolve_tenant_id(req);
+                 auto name = req.matches[1].str();
+                 if (!db_->reset_user_traffic(tid, name)) {
+                     res.status = 404;
+                     res.set_content(R"({"error":"user not found"})", "application/json");
+                     return;
+                 }
+                 res.set_content(R"({"ok":true})", "application/json");
+             });
+
+    svr.Get(R"(/api/users/([^/]+)/link)", [this](const httplib::Request& req, httplib::Response& res) {
+        auto tid = resolve_tenant_id(req);
+        auto name = req.matches[1].str();
+        auto u = db_->user_by_name(tid, name);
+        if (!u) {
+            res.status = 404;
+            res.set_content(R"({"error":"user not found"})", "application/json");
+            return;
+        }
+        const std::string sub =
+            "vless://" + u->uuid + "@YOUR_DOMAIN:443?encryption=none&security=reality&type=tcp#"
+            + u->name;
+        res.set_content(nlohmann::json{{"subscription", sub}, {"uuid", u->uuid}}.dump(),
+                        "application/json");
     });
 
     svr.Delete(R"(/api/users/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
         auto tid = resolve_tenant_id(req);
         auto name = req.matches[1].str();
         db_->delete_user(tid, name);
-        auto users = db_->list_users(tid);
-        xray_->sync_users(users);
-        hysteria_->sync_users(users);
+        sync_vpn_users(tid);
         res.set_content(R"({"ok":true})", "application/json");
     });
 

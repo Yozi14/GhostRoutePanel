@@ -6,6 +6,7 @@
 #include "ghostroute/tenant_context.hpp"
 
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 #include <memory>
 
 namespace ghostroute {
@@ -29,6 +30,8 @@ private:
 
     void register_routes(httplib::Server& svr);
     int64_t resolve_tenant_id(const httplib::Request& req) const;
+    void sync_vpn_users(int64_t tenant_id);
+    static nlohmann::json user_to_json(const User& u);
 };
 
 } // namespace ghostroute

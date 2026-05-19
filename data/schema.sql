@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS users (
     traffic_limit_bytes INTEGER NOT NULL DEFAULT 0, -- 0 = unlimited
     traffic_used_bytes  INTEGER NOT NULL DEFAULT 0,
     enabled     INTEGER NOT NULL DEFAULT 1,
+    device_limit INTEGER NOT NULL DEFAULT 0,
+    device_count INTEGER NOT NULL DEFAULT 0,
     expires_at  TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(tenant_id, name)

@@ -21,7 +21,19 @@ struct User {
     int64_t traffic_limit_bytes{};
     int64_t traffic_used_bytes{};
     bool enabled{true};
+    int device_limit{};  // 0 = unlimited devices
+    int device_count{};  // active sessions (future ingest)
     std::optional<std::string> expires_at;
+};
+
+struct SystemMetrics {
+    double cpu_percent{};
+    double ram_percent{};
+    int64_t ram_used_mb{};
+    int64_t ram_total_mb{};
+    double disk_percent{};
+    int64_t uptime_sec{};
+    double load_avg_1{};
 };
 
 struct Alert {

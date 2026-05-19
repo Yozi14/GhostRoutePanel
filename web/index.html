@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GhostRoutePanel</title>
+  <title>GhostRoutePanel — Freedom Route</title>
+  <link rel="icon" href="/assets/fox-logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/css/theme.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -12,8 +13,11 @@
   <div class="layout">
     <aside class="sidebar">
       <div class="logo">
-        <span class="logo-icon">👻</span>
-        <span class="logo-text">GhostRoute<span>Panel</span></span>
+        <img src="/assets/fox-logo.svg" alt="" class="logo-fox" width="40" height="40" />
+        <div class="logo-text-wrap">
+          <span class="logo-text">GhostRoute</span>
+          <span class="logo-tagline">freedom route</span>
+        </div>
       </div>
       <nav>
         <a href="#dashboard" class="nav-item active" data-page="dashboard">Дашборд</a>
@@ -24,7 +28,8 @@
         <a href="#provision" class="nav-item" data-page="provision">Установка</a>
       </nav>
       <div class="sidebar-footer">
-        <button id="themeToggle" class="btn ghost" type="button">🌓 Тема</button>
+        <button id="themeToggle" class="btn ghost" type="button">Тема</button>
+        <p class="version-pill">v0.2 · Qt-клиент — скоро</p>
       </div>
     </aside>
 
@@ -48,12 +53,12 @@
             <p class="value" id="statTraffic">—</p>
           </article>
           <article class="card stat">
-            <p class="label">Алерты</p>
-            <p class="value warn" id="statAlerts">—</p>
+            <p class="label">CPU</p>
+            <p class="value" id="statCpu">—</p>
           </article>
           <article class="card stat">
-            <p class="label">Xray / Hysteria</p>
-            <p class="value" id="statServices">—</p>
+            <p class="label">RAM</p>
+            <p class="value" id="statRam">—</p>
           </article>
         </div>
         <div class="grid charts">
@@ -85,14 +90,13 @@
         <article class="card">
           <div class="card-header">
             <h2>Пользователи</h2>
-            <button class="btn primary" id="btnAddUser" type="button">+ Добавить</button>
+            <div class="header-actions">
+              <input type="search" id="userSearch" class="search-input" placeholder="Поиск…" />
+              <button class="btn ghost" id="btnExportUsers" type="button">Экспорт JSON</button>
+              <button class="btn primary" id="btnAddUser" type="button">+ Добавить</button>
+            </div>
           </div>
-          <table class="table" id="usersTable">
-            <thead>
-              <tr><th>Имя</th><th>Использовано</th><th>Лимит</th><th>Статус</th><th></th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div id="usersGrid" class="users-grid"></div>
         </article>
       </section>
 
@@ -104,6 +108,25 @@
       </section>
 
       <section id="page-server" class="page">
+        <div class="grid stats metrics-row">
+          <article class="card stat metric-card">
+            <div class="metric-head"><span>CPU</span><strong id="metricCpuVal">—</strong></div>
+            <div class="progress-bar"><div class="progress-fill" id="metricCpuBar"></div></div>
+          </article>
+          <article class="card stat metric-card">
+            <div class="metric-head"><span>RAM</span><strong id="metricRamVal">—</strong></div>
+            <div class="progress-bar"><div class="progress-fill ram" id="metricRamBar"></div></div>
+            <p class="metric-sub" id="metricRamSub">—</p>
+          </article>
+          <article class="card stat metric-card">
+            <div class="metric-head"><span>Диск /</span><strong id="metricDiskVal">—</strong></div>
+            <div class="progress-bar"><div class="progress-fill disk" id="metricDiskBar"></div></div>
+          </article>
+          <article class="card stat metric-card">
+            <div class="metric-head"><span>Uptime</span><strong id="metricUptime">—</strong></div>
+            <p class="metric-sub">Load: <span id="metricLoad">—</span></p>
+          </article>
+        </div>
         <article class="card">
           <h2>Health Check</h2>
           <div id="healthGrid" class="health-grid"></div>
@@ -113,7 +136,7 @@
       <section id="page-provision" class="page">
         <article class="card">
           <h2>Автонастройка сервера</h2>
-          <p class="muted">Как в Hiddify — один клик: Nginx, TLS, Xray, Hysteria.</p>
+          <p class="muted">Как в Hiddify — один клик: Nginx, TLS, Xray, Hysteria. Не запускайте, если уже стоит Hiddify на том же сервере.</p>
           <form id="provisionForm" class="form">
             <label>Домен <input name="domain" placeholder="vpn.example.com" required /></label>
             <label>Email (Certbot) <input name="email" type="email" placeholder="admin@example.com" required /></label>
@@ -126,13 +149,14 @@
   </div>
 
   <dialog id="userDialog">
-    <form method="dialog" id="userForm">
-      <h3>Новый пользователь</h3>
-      <label>Имя <input name="name" required /></label>
-      <label>Лимит (например 100gb) <input name="limit" placeholder="100gb" /></label>
+    <form id="userForm" class="form dialog-form">
+      <h3 id="userDialogTitle">Новый пользователь</h3>
+      <label>Имя <input name="name" required autocomplete="off" /></label>
+      <label>Лимит трафика <input name="limit" placeholder="100gb или пусто = ∞" /></label>
+      <label>Лимит устройств <input name="device_limit" type="number" min="0" placeholder="0 = без лимита" value="0" /></label>
       <menu>
-        <button value="cancel" class="btn ghost">Отмена</button>
-        <button value="default" class="btn primary">Создать</button>
+        <button type="button" class="btn ghost" id="userDialogCancel">Отмена</button>
+        <button type="submit" class="btn primary">Сохранить</button>
       </menu>
     </form>
   </dialog>
