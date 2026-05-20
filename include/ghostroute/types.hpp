@@ -79,6 +79,7 @@ struct PanelConfig {
     std::string xray_config{"/etc/ghostroute/xray/config.json"};
     std::string hysteria_binary{"/usr/local/bin/hysteria"};
     std::string hysteria_config{"/etc/ghostroute/hysteria/config.yaml"};
+    std::string domain{"YOUR_DOMAIN"};
     int cpu_threshold{85};
     int cert_warn_days{7};
 };

@@ -24,6 +24,7 @@ PanelConfig Config::load(const std::string& path) {
         if (p.contains("web_root")) cfg.web_root = p["web_root"].get<std::string>();
         if (p.contains("data_dir")) cfg.data_dir = p["data_dir"].get<std::string>();
         if (p.contains("database")) cfg.database = p["database"].get<std::string>();
+        if (p.contains("domain")) cfg.domain = p["domain"].get<std::string>();
     }
     if (j.contains("multitenancy")) {
         const auto& m = j["multitenancy"];

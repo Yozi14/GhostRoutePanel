@@ -153,7 +153,7 @@ void App::register_routes(httplib::Server& svr) {
             return;
         }
         const std::string sub =
-            "vless://" + u->uuid + "@YOUR_DOMAIN:443?encryption=none&security=reality&type=tcp#"
+            "vless://" + u->uuid + "@" + cfg_.domain + ":443?encryption=none&security=reality&type=tcp#"
             + u->name;
         res.set_content(nlohmann::json{{"subscription", sub}, {"uuid", u->uuid}}.dump(),
                         "application/json");

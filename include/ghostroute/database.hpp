@@ -9,6 +9,7 @@
 #include <sqlite3.h>
 
 struct sqlite3;
+struct sqlite3_stmt;
 
 namespace ghostroute {
 

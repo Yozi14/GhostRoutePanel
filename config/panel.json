@@ -1,0 +1,51 @@
+{
+  "panel": {
+    "name": "GhostRoutePanel",
+    "host": "0.0.0.0",
+    "port": 18080,
+    "web_root": "./web",
+    "data_dir": "./data/runtime",
+    "database": "./data/runtime/panel.db"
+  },
+  "multitenancy": {
+    "enabled": true,
+    "default_tenant": "default"
+  },
+  "geoip": {
+    "database_path": "./data/GeoLite2-Country.mmdb",
+    "enabled": true
+  },
+    "health": {
+    "check_interval_sec": 30,
+    "auto_restart": false,
+    "services": {
+      "xray": {
+        "enabled": false,
+        "binary": "/usr/local/bin/xray",
+        "config": "/etc/ghostroute/xray/config.json",
+        "systemd_unit": "xray"
+      },
+      "hysteria": {
+        "enabled": false,
+        "binary": "/usr/local/bin/hysteria",
+        "config": "/etc/ghostroute/hysteria/config.yaml",
+        "systemd_unit": "hysteria"
+      }
+    }
+  },
+  "alerts": {
+    "cpu_threshold_percent": 85,
+    "cert_warn_days": 7,
+    "traffic_limit_notify": true
+  },
+  "provision": {
+    "auto_install_deps": true,
+    "nginx_config_path": "/etc/nginx/sites-available/ghostroute",
+    "certbot_email": "admin@example.com"
+  },
+  "update": {
+    "channel": "stable",
+    "github_repo": "ghostroute/GhostRoutePanel",
+    "check_on_start": false
+  }
+}
