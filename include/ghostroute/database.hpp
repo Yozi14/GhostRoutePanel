@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <sqlite3.h>
+#include <sqlite3.h>
 
 struct sqlite3;
 
